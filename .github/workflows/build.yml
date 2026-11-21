@@ -50,7 +50,6 @@ jobs:
           fi
           echo "version=${VER}" >> "${GITHUB_OUTPUT}"
           echo "tagged=${TAGGED}" >> "${GITHUB_OUTPUT}"
-          echo "Name: deltaport-mod-loader ${VER}" >> "${GITHUB_OUTPUT}"
 
       - name: Package release archives
         run: |
