@@ -55,8 +55,14 @@ jobs:
         run: |
           set -e
           NAME="deltaport-mod-loader-${{ steps.version.outputs.version }}"
-          tar --exclude='.git' -czf "${NAME}.tar.gz" -C . .
-          tar --exclude='.git' -cJf "${NAME}.tar.xz" -C . .
+          # Build the archives OUTSIDE the source tree - writing them into
+          # the directory being archived makes tar fail with
+          # "file changed as we read it".
+          BUILD_DIR="$(mktemp -d)"
+          tar --exclude='.git' -czf "${BUILD_DIR}/${NAME}.tar.gz" -C . .
+          tar --exclude='.git' -cJf "${BUILD_DIR}/${NAME}.tar.xz" -C . .
+          mv "${BUILD_DIR}/${NAME}".tar.* .
+          rm -rf "$BUILD_DIR"
           sha256sum "${NAME}.tar.gz" "${NAME}.tar.xz" > SHA256SUMS
           cat SHA256SUMS
 
