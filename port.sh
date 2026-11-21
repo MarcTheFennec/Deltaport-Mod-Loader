@@ -1,27 +1,34 @@
 #!/usr/bin/env bash
-ARGS=$1
-set -e pipefail
+# deltaport (mod loader edition) - unofficial DELTARUNE Linux port
+#
+# This version NEVER modifies your original game files:
+#   - the game data is COPIED (and patched) into ~/.local/share/DELTARUNE/deltaport
+#   - music/videos are LINKED, not moved or renamed
+#   - Deltarune mods can be installed in the 'mods/' folder and are applied
+#     automatically on game launch (see modloader.sh)
+#
+# Usage:
+#   ./port.sh             # port the game (interactive)
+#   ./port.sh nxrune      # add the console borders mod to an existing port
+#   ./port.sh steamcloud  # add Steam Cloud saves support
+
+# NOTE: 'set -e pipefail' would clobber the positional parameters, so use -o.
+set -e -o pipefail
 set -E
 
-DELTARUNEDIR=""
+ARGS="${1:-}"
+
 SCRIPTDIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+# shellcheck source=lib.sh
+source "$SCRIPTDIR/lib.sh"
+
+DELTARUNEDIR=""
 VERSION=""
-LATEST_VERSION="0.0.253"
-CHAPTERS=5
 STEAMCLOUD=0
 NXRUNE_MOD=0
 
-VERSION_247_CHECKSUM="908643b7593b000f5b6c61bb484d086a"
-VERSION_250_CHECKSUM="1f00145d681f830f1249d9493ba8f579"
-VERSION_253_CHECKSUM="83a5a14f9b92a20f21fb9ec6c8528469"
-NXRUNE_CHECKSUM="1fb6530825f6c895b5af845c06b3577e"
-
-log() { echo -e "\e[1;34m::\e[0m \e[1m$1\e[0m"; }
-warn() { echo -e "\n\e[38;5;172m::\e[0m \e[1m\e[38;5;208m$1\e[0m"; }
-error() { echo -e "\n\e[38;5;203m::\e[0m \e[1m\e[38;5;196m$1\e[0m" && exit 1; }
-
 trap 'warn "WARNING: Script cancelled by user, port may be incomplete." && exit 1' SIGINT
-trap 'error "An error ocurred while running this script :("' ERR
+trap 'error "An error occurred while running this script :("' ERR
 
 # Check for dependencies
 if [ ! -d "$HOME/.local/share/Steam" ]; then
@@ -30,272 +37,230 @@ fi
 "$SCRIPTDIR/deps.sh"
 
 function steam_cloud_support {
-     if [[ "$STEAMCLOUD" == 1 ]]; then
-            log "Adding Steam Cloud support..."
-            # Needed for the symlink to work
-            mkdir -p "$HOME/.config/DELTARUNE"
-            # NOTE: From my observations, Steam Cloud seems to create this directory automatically when syncing saves, but just to make sure:
-            mkdir -p "$HOME/.local/share/Steam/steamapps/compatdata/1671210/pfx/drive_c/users/steamuser/Local Settings/Application Data"
-            # NOTE 2: Other directory where saves are also stored
-            mkdir -p "$HOME/.local/share/Steam/steamapps/compatdata/1671210/pfx/drive_c/users/steamuser/AppData/Local/"
-            cd "$HOME/.local/share/Steam/steamapps/compatdata/1671210/pfx/drive_c/users/steamuser/Local Settings/Application Data"
-            if [[ -d "DELTARUNE" ]]; then
-                rm -r "DELTARUNE"
-            fi
-            ln -s "$HOME/.config/DELTARUNE" "DELTARUNE"
-            cd "$HOME/.local/share/Steam/steamapps/compatdata/1671210/pfx/drive_c/users/steamuser/AppData/Local"
-            if [[ -d "DELTARUNE" ]]; then
-                rm -r "DELTARUNE"
-            fi
-            ln -s "$HOME/.config/DELTARUNE" "DELTARUNE"
-            log "Steam Cloud support added! Please try not deleting the '.config/DELTARUNE' folder before running the game as it may break things."
-     fi
-}
-
-function nxrune_mod_support {
-    if [[ $NXRUNE_MOD -eq 1 ]]; then
-            if echo "${NXRUNE_CHECKSUM}" $DELTARUNEDIR/assets/game.unx | md5sum -c; then
-                error "ERROR: Hold on there mate, it seems like the mod patches are already applied, can't apply again sorry"
-            fi
-            log "Applying the 'nxrune' mod patches..."
-            hpatchz -f "$DELTARUNEDIR/assets/game.unx" "$SCRIPTDIR/files/patches/nxrune/00-chapterselect.hpatch" "$DELTARUNEDIR/assets/game.unx"
-            for ((i = 1 ; i <= CHAPTERS ; i++)); do
-                hpatchz -f "$DELTARUNEDIR/chapter${i}_linux/assets/game.unx" $SCRIPTDIR/files/patches/nxrune/0${i}-*.hpatch "$DELTARUNEDIR/chapter${i}_linux/assets/game.unx"
-            done
-            log "Mod patches sucessfully applied :D"
-            if [[ "$ARGS" == "nxrune" ]]; then exit 0; fi
+    if [ "$STEAMCLOUD" = "1" ]; then
+        log "Adding Steam Cloud support..."
+        # Needed for the symlink to work
+        mkdir -p "$HOME/.config/DELTARUNE"
+        # NOTE: From my observations, Steam Cloud seems to create this directory
+        # automatically when syncing saves, but just to make sure:
+        mkdir -p "$HOME/.local/share/Steam/steamapps/compatdata/1671210/pfx/drive_c/users/steamuser/Local Settings/Application Data"
+        # NOTE 2: Other directory where saves are also stored
+        mkdir -p "$HOME/.local/share/Steam/steamapps/compatdata/1671210/pfx/drive_c/users/steamuser/AppData/Local/"
+        cd "$HOME/.local/share/Steam/steamapps/compatdata/1671210/pfx/drive_c/users/steamuser/Local Settings/Application Data"
+        if [ -d "DELTARUNE" ]; then
+            rm -r "DELTARUNE"
+        fi
+        ln -s "$HOME/.config/DELTARUNE" "DELTARUNE"
+        cd "$HOME/.local/share/Steam/steamapps/compatdata/1671210/pfx/drive_c/users/steamuser/AppData/Local"
+        if [ -d "DELTARUNE" ]; then
+            rm -r "DELTARUNE"
+        fi
+        ln -s "$HOME/.config/DELTARUNE" "DELTARUNE"
+        log "Steam Cloud support added! Please try not deleting the '.config/DELTARUNE' folder before running the game as it may break things."
     fi
+    return 0
 }
 
-if [[ $ARGS == "steamcloud" ]]; then STEAMCLOUD=1; steam_cloud_support && exit 0; fi
+# Older deltaport versions ported the game in-place (files renamed/moved inside
+# the game folder). This version needs the game in its original state.
+function check_old_port {
+    if [ -f "$DELTARUNEDIR/DELTARUNE.sh" ] && [ ! -f "$DELTARUNEDIR/data.win" ] && [ -f "$DELTARUNEDIR/assets/game.unx" ]; then
+        error "This game folder was ported in-place by an older version of deltaport (its files were renamed/moved inside it).
+This version keeps your original game files untouched, so it needs the game in its ORIGINAL state.
+To migrate: restore the original game files (re-download the game files - see the 'Other versions' section of the README, or re-install the game) and run this script again."
+    fi
+    return 0
+}
 
 function check_version {
-    if echo "${VERSION_244_CHECKSUM}" $DELTARUNEDIR/data.win | md5sum -c; then
-        VERSION="0.0.244"
-   fi
-
-   if echo "${VERSION_250_CHECKSUM}" $DELTARUNEDIR/data.win | md5sum -c; then
-        VERSION="0.0.250"
-   fi
-
-   if echo "${VERSION_253_CHECKSUM}" $DELTARUNEDIR/data.win | md5sum -c; then
-        VERSION="0.0.253"
-   fi
+    VERSION="$(detect_version "$DELTARUNEDIR/data.win")"
+    return 0
 }
 
-function port_game() {
-   nxrune_mod_support
-   echo ""
+function confirm() {
+    # confirm <prompt>  -> exits the script unless the user answers y
+    local prompt="$1" yn
+    while true; do
+        read -r -p "$prompt" yn
+        case "$yn" in
+            [Yy]*) return 0 ;;
+            [Nn]*) exit 1 ;;
+            *) exit 1 ;;
+        esac
+    done
+}
 
-   while true; do
-        read -p "$(log 'Start the porting process? [y/n]: ')" yn
-        case $yn in
-            [Yy]* ) break;;
-            [Nn]* ) exit 1; break;;
-            * ) exit 1; break;;
-            esac
-        done
-
-    if [[ -f "$DELTARUNEDIR/DELTARUNE.sh" ]]; then
-        if [[ -f "$DELTARUNEDIR/data.win" ]]; then
-            log "Windows and Linux game data detected on DELTARUNE directory, assuming an update, do you want to update the game port to the latest version?"
-            while true; do
-            read -p "Update game? [y/n]: " yn
-                case $yn in
-                    [Yy]* ) "$SCRIPTDIR/update.sh" "$DELTARUNEDIR" && exit 0; break;;
-                    [Nn]* ) exit 1; break;;
-                    * ) exit 1; break;;
-                esac
-            done
-        else
-            warn "WARNING: It appears the game has already been ported (DELTARUNE.sh file found). Trying to port again may cause issues."
-            while true; do
-                read -p "Continue anyway? [y/n]: " yn
-                case $yn in
-                    [Yy]* ) break;;
-                    [Nn]* ) exit 1; break;;
-                    * ) exit 1; break;;
-                esac
-            done
+function install_scripts_in_place {
+    # Make the deltaport directory self-contained so the port keeps working
+    # even if the release folder you extracted gets deleted.
+    # (Skip when already running from the deltaport directory itself.)
+    mkdir -p "$DELTAPORTDIR"
+    if [ "$SCRIPTDIR" != "$DELTAPORTDIR" ]; then
+        cp "$SCRIPTDIR/port.sh" "$SCRIPTDIR/update.sh" "$SCRIPTDIR/deps.sh" \
+            "$SCRIPTDIR/modloader.sh" "$SCRIPTDIR/DELTARUNE.sh" "$SCRIPTDIR/lib.sh" \
+            "$SCRIPTDIR/launcher.sh" "$SCRIPTDIR/mod-index.json" \
+            "$DELTAPORTDIR/"
+        cp "$SCRIPTDIR/deltarune" "${DELTAPORTDIR:?}/"
+        cp "$SCRIPTDIR/icon.png" "${DELTAPORTDIR:?}/"
+        rm -rf "${DELTAPORTDIR:?}/files"
+        cp -r "$SCRIPTDIR/files" "$DELTAPORTDIR/"
+        # Ubuntu/Debian: carry over the static FFmpeg4 libraries (if deps.sh
+        # downloaded them) so video playback works.
+        if [ -f "$SCRIPTDIR/.ubuntu" ]; then
+            cp "$SCRIPTDIR/.ubuntu" "$DELTAPORTDIR/"
+            rm -rf "${DELTAPORTDIR:?}/lib"
+            cp -r "$SCRIPTDIR/lib" "$DELTAPORTDIR/"
         fi
     fi
+    chmod +x "$DELTAPORTDIR/"*.sh "$DELTAPORTDIR/deltarune"
+    return 0
+}
 
-   log "Detecting game version..."
+function port_game {
+    check_old_port
 
-   check_version
+    if [ -d "$BASEDIR" ]; then
+        local old_gamedir
+        old_gamedir="$(cat "$DELTAPORTDIR/.gamedir" 2> /dev/null || true)"
+        if [ "$old_gamedir" = "$DELTARUNEDIR" ] && [ -f "$DELTARUNEDIR/data.win" ]; then
+            log "Found an existing deltaport installation for this game, with updated game data (data.win present)."
+            log "Updating keeps your installed mods."
+            confirm "Update the port to the latest supported version? [y/n]: "
+            "$DELTAPORTDIR/update.sh" "$DELTARUNEDIR"
+            exit 0
+        fi
+        warn "A deltaport installation already exists at $DELTAPORTDIR."
+        confirm "Rebuild the port from scratch? (Your installed mods in mods/ will be kept) [y/n]: "
+    fi
 
-   if [[ "$VERSION" == "" ]]; then
-        warn "WARNING: data.win checksum does not match with any version. Please check supported versions or you may have corrupted game files."
-        while true; do
-            read -p "Continue anyway? [y/n]: " yn
-            case $yn in
-                [Yy]* ) log "Using latest version available" && VERSION="$LATEST_VERSION"; break;;
-                [Nn]* ) exit 1; break;;
-                * ) exit 1; break;;
-		    esac
-        done
+    log "Detecting game version..."
+    check_version
+
+    if [ -z "$VERSION" ]; then
+        warn "WARNING: data.win checksum does not match any supported version (0.0.247, 0.0.250, 0.0.253)."
+        warn "You may have a corrupted or unsupported game."
+        confirm "Continue anyway, using the latest available patches ($LATEST_VERSION)? [y/n]: "
+        log "Using patches for version $LATEST_VERSION"
+        VERSION="$LATEST_VERSION"
     else
         log "Detected version $VERSION"
     fi
 
-   log "Using directory: $DELTARUNEDIR"
-   cd "$DELTARUNEDIR"
+    log "Using game directory: $DELTARUNEDIR (it will NOT be modified)"
 
-   log "Renaming files..."
+    install_scripts_in_place
+    build_base "$DELTARUNEDIR" "$VERSION"
+    install_mods_readme
 
-   for chapter in *; do
-        linux_name=$(echo "$chapter" | sed s/windows/linux/)
-        if [[ "$chapter" != "$linux_name" ]]; then
-                mv "$chapter" "$linux_name";
-        fi
-   done
-
-   find "mus/" -exec bash -c 'if [[ "$0" != "${0,,}" ]]; then mv --update=none "$0" "${0,,}"; fi' {} \;
-   find "chapter3_linux/vid/" -exec bash -c 'if [[ "$0" != "${0,,}" ]]; then mv --update=none "$0" "${0,,}"; fi' {} \;
-   echo ""
-
-   log "Moving files..."
-   rm "DELTARUNE.exe"
-   ln -s DELTARUNE.sh DELTARUNE.exe
-   mv data.win game.unx
-    
-   cp "$SCRIPTDIR/deltarune" .
-   cp "$SCRIPTDIR/DELTARUNE.sh" .
-   cp "$SCRIPTDIR/files/options.ini" .
-   cp "$SCRIPTDIR/icon.png" .
-    if [ -f "$SCRIPTDIR/.ubuntu" ]; then
-        cp "$SCRIPTDIR/.ubuntu" .
-        cp -r "$SCRIPTDIR/lib" .
-   fi
-
-   find . -type d -name "chapter*_linux" -print0 | while IFS= read -r -d $'\0' chapter_dir; do
-        chapter_number=$(echo "$chapter_dir" | sed 's/[^0-9]//g')
-        mv "$chapter_dir/AUDIO_INTRONOISE.ogg" "$chapter_dir/audio_intronoise.ogg"
-        mv "$chapter_dir/data.win" "$chapter_dir/game.unx"
-        
-        mkdir -p "$chapter_dir/assets"
-        find "$chapter_dir" -maxdepth 1 -not -name "assets" -exec mv --update=none {} "$chapter_dir/assets" \;
-
-        cp "$SCRIPTDIR/files/options_${chapter_number}.ini" "$chapter_dir/assets/options.ini"
-        cp "$SCRIPTDIR/icon.png" "$chapter_dir/assets"
-        cp "$SCRIPTDIR/deltarune" "$chapter_dir"
-        ln -sf "../../assets/mus" "$chapter_dir/assets/mus"
-   done
-
-   mkdir -p "assets"
-   mv options.ini game.unx mus icon.png -t "assets/"
-
-   log "Symlinking Chapter 3's videos..."
-
-   cd "chapter3_linux/assets/vid"
-   ln -s "tennaintrof1_compressed_28.mp4" "tennaIntroF1_compressed_28.mp4"
-   ln -s "tennaintrojpf1_compressed_28.mp4" "tennaIntroJPf1_compressed_28.mp4"
-
-   if [[ "$CHAPTERS" -ge 5 ]]; then
-        log "Fixing Chapter 5's videos..."
-
-        cd "$SCRIPTDIR"
-        cd "$DELTARUNEDIR"
-
-        cd "chapter5_linux/assets/vid"
-        cp ch5_intro_en.mp4 ch5_intro_en.mp4.temp
-        cp ch5_intro_jp.mp4 ch5_intro_jp.mp4.temp
-
-        # On Chapter 5, the audio is separate from the video
-        # This causes an error on Linux, since the videos don't have an audio stream. Error: 'video_open: Cannot find audio stream'
-        # Here, we create a dummy audio stream in the file with no audio, so the file is loaded properly.
-        ffmpeg -y -i ch5_intro_en.mp4.temp -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 -c:v copy -shortest ch5_intro_en.mp4
-        ffmpeg -y -i ch5_intro_jp.mp4.temp -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 -c:v copy -shortest ch5_intro_jp.mp4
-
-        rm ch5_intro_en.mp4.temp
-        rm ch5_intro_jp.mp4.temp
-   fi
-   cd "$SCRIPTDIR"
-
-   log "Patching game data..."
-
-   hpatchz -f "$DELTARUNEDIR/assets/game.unx" "$SCRIPTDIR/files/patches/v$VERSION/00-chapterselect.hpatch" "$DELTARUNEDIR/assets/game.unx"
-   for ((i = 1 ; i <= CHAPTERS ; i++)); do
-         hpatchz -f "$DELTARUNEDIR/chapter${i}_linux/assets/game.unx" $SCRIPTDIR/files/patches/v$VERSION/0${i}-*.hpatch "$DELTARUNEDIR/chapter${i}_linux/assets/game.unx"
-   done
-
-   # Only the latest version is supported!
-   if [[ "$VERSION" == $LATEST_VERSION ]]; then
+    if [ "$VERSION" = "$LATEST_VERSION" ]; then
+        local yn
         while true; do
-            read -p "$(log 'Optionally add the Console Borders mod? [y/n]: ')" yn
-            case $yn in
-                [Yy]* ) NXRUNE_MOD=1; break;;
-                [Nn]* ) log "If you change your mind, run './port.sh nxrune' to add them!!"; break;;
-                *) break;;
+            read -r -p "$(log 'Optionally install the Console Borders mod (nxrune)? [y/n]: ')" yn
+            case "$yn" in
+                [Yy]*) NXRUNE_MOD=1; break ;;
+                [Nn]*) log "If you change your mind, run './port.sh nxrune' to add it!!"; break ;;
+                *) break ;;
             esac
         done
-   fi
+    fi
 
-   while true; do
-        read -p "$(log 'Optionally add Steam Cloud saves support? [y/n]: ')" yn
-        case $yn in
-            [Yy]* ) STEAMCLOUD=1; break;;
-            [Nn]* ) break;;
-            *) break;;
-            esac
-   done
+    if [ "$NXRUNE_MOD" = "1" ]; then
+        install_nxrune_mod
+    fi
 
-   steam_cloud_support
-   nxrune_mod_support
+    local yn
+    while true; do
+        read -r -p "$(log 'Optionally add Steam Cloud saves support? [y/n]: ')" yn
+        case "$yn" in
+            [Yy]*) STEAMCLOUD=1; break ;;
+            [Nn]*) break ;;
+            *) break ;;
+        esac
+    done
 
-   echo -e "\e[1;32m SUCCESS! The port script finished. \e[0m"
-   log 'To play DELTARUNE, go to Steam -> DELTARUNE -> Properties -> Launch Options -> Put this: "./DELTARUNE.sh" -- %command%'
-   log "Or, you can run ./DELTARUNE.sh in the game folder. (If you have issues with Steam, run the game this way)"
-   log "For updates on Steam, go through this script again to update the port to the latest version available."
-   log "Thanks for using this project and have fun!"
-   exit 0
+    steam_cloud_support
+
+    log "Building the working tree (applying your mods)..."
+    "$DELTAPORTDIR/modloader.sh" rebuild
+
+    echo -e "\e[1;32m SUCCESS! The port is ready. Your original game files were left untouched. \e[0m"
+    log "To play DELTARUNE through Steam, add this to the game's Launch Options (DELTARUNE -> Properties -> Launch Options):"
+    log "  $DELTAPORTDIR/DELTARUNE.sh -- %command%"
+    log "Or, you can run it directly in a terminal:"
+    log "  $DELTAPORTDIR/DELTARUNE.sh"
+    log "To manage mods, use: $DELTAPORTDIR/modloader.sh (mods live in $MODSDIR)"
+    log "For updates on Steam, run this script again (or $DELTAPORTDIR/update.sh) to update the port."
+    log "Thanks for using this project and have fun!"
+    exit 0
 }
 
-function select_dir() {
-   echo ""
-   log "Please type the path of DELTARUNE below (eg. /home/pug/.local/share/Steam/steamapps/common/DELTARUNE):"
-   read path
+function select_dir {
+    echo ""
+    log "Please type the path of DELTARUNE below (eg. /home/pug/.local/share/Steam/steamapps/common/DELTARUNE):"
+    read -r path
 
-   if [ "$path" = "" ]; then
-      select_dir
-   fi
+    if [ -z "$path" ]; then
+        select_dir
+    fi
 
-   if [ ! -d "$path" ]; then
+    if [ ! -d "$path" ]; then
         warn "Directory doesn't exist, please try again"
         select_dir
-   fi
+    fi
 
-   if [ ! -f "$path/data.win" ] && [ ! -f "$path/assets/game.unx" ]; then
+    if [ ! -f "$path/data.win" ] && [ ! -f "$path/assets/game.unx" ]; then
         warn "Unable to find game data (data.win/game.unx) at directory, please try again."
         select_dir
-   fi
+    fi
 
-   DELTARUNEDIR=${path%/}
-   port_game
+    DELTARUNEDIR="${path%/}"
+    port_game
 }
 
-find_deltarune_dir() {
+function find_deltarune_dir {
     if [ -d "$HOME/.local/share/Steam/steamapps/common/DELTARUNE" ]; then
         DELTARUNEDIR="$HOME/.local/share/Steam/steamapps/common/DELTARUNE"
         log "Detected deltarune directory at $DELTARUNEDIR."
+        local yn
         while true; do
-            read -p "Is this correct? [y/n]: " yn
-            case $yn in
-                [Yy]* ) port_game; break;;
-                [Nn]* ) select_dir; break;;
-                * ) select_dir; break;;
-                esac
-            done
+            read -r -p "Is this correct? [y/n]: " yn
+            case "$yn" in
+                [Yy]*) port_game; break ;;
+                [Nn]*) select_dir; break ;;
+                *) select_dir; break ;;
+            esac
+        done
     else
         select_dir
     fi
 }
 
-if [[ $ARGS == "nxrune" ]]; then NXRUNE_MOD=1; find_deltarune_dir; fi
+if [ "$ARGS" = "nxrune" ]; then
+    if [ ! -d "$BASEDIR" ]; then
+        warn "No deltaport installation found yet - run './port.sh' first, then run './port.sh nxrune'."
+        exit 1
+    fi
+    if [ ! -d "$DELTAPORTDIR/files/patches/nxrune" ]; then
+        error "The nxrune patches were not found next to this script - they ship with the release files/patches/nxrune/."
+    fi
+    log "Installing the Console Borders mod (nxrune)..."
+    install_nxrune_mod
+    log "Rebuilding the working tree..."
+    "$DELTAPORTDIR/modloader.sh" rebuild
+    echo -e "\e[1;32m SUCCESS! Borders mod applied. Launch the game with: $DELTAPORTDIR/DELTARUNE.sh \e[0m"
+    exit 0
+fi
 
-log "Welcome to the unofficial DELTARUNE Linux port."
-log "This is the port for version(s): 0.0.247-53"
+if [ "$ARGS" = "steamcloud" ]; then
+    STEAMCLOUD=1
+    steam_cloud_support
+    exit 0
+fi
+
+log "Welcome to the unofficial DELTARUNE Linux port (mod loader edition)."
+log "This is the port for version(s): 0.0.247, 0.0.250, 0.0.253"
 log "You will need to bring your own game files, as none of them are included here."
+log "Your original game files are NEVER modified: the port is installed in $DELTAPORTDIR"
 echo ""
 
 find_deltarune_dir

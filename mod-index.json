@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "description": "Known Deltarune mods for the deltaport launcher. 'url' must point to a .zip / .tar.gz / .tar.xz that the launcher can install: either a deltaport mod folder (with files/ and/or patches/), or a modded data.win / game.unx. Add your own entries below - the launcher reads this file when you choose 'Browse known mods'.",
+  "mods": [
+    {
+      "id": "nxrune",
+      "name": "NXRUNE console borders",
+      "bundled": true,
+      "url": "https://github.com/IruzzArcana/NXRUNE",
+      "description": "Restores the original console-style borders on PC. Ships with deltaport (mods/00-nxrune, installed via ./port.sh nxrune); the URL is the upstream source."
+    }
+  ]
+}
