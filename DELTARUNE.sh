@@ -81,7 +81,9 @@ main() {
         HIDE_INPUT_COMMAND="bwrap --bind / / --tmpfs /dev/input"
     fi
 
-    # Run the game!
+    # Run the game! (Must happen before the watch loop is forked: the loop
+    # inherits DELTARUNEPID/FIRST_RUN, which run_game needs when a chapter
+    # switch happens from inside it.)
     local arg="${1:-}"
     case "$arg" in
         0 | 1 | 2 | 3 | 4 | 5)
@@ -109,6 +111,13 @@ main() {
     ) &
     WATCH_LOOP_PID=$!
     wait "$WATCH_LOOP_PID"
+
+    # The watch pipeline has ended (e.g. inotifywait died or was killed)
+    # while the game was still running. Make sure the game and the watchdog
+    # still get a clean shutdown (exit_game is idempotent via .exit_lock).
+    if pidof deltarune > /dev/null 2>&1; then
+        exit_game
+    fi
 }
 
 function exit_game {
@@ -119,8 +128,15 @@ function exit_game {
     touch "$SAVEDIR/.exit_lock"
     echo "Thanks for playing, hope you had fun :D"
     if [ -n "$WATCH_LOOP_PID" ]; then
+        # Kill the pipeline's children FIRST: killing the subshell first would
+        # reparent them to init and pkill -P would no longer find them.
+        pkill -9 -P "$WATCH_LOOP_PID" 2> /dev/null || true
         kill -9 "$WATCH_LOOP_PID" 2> /dev/null || true
     fi
+    # Belt and braces: exit_game also runs from the watch_game subshell, which
+    # was forked before WATCH_LOOP_PID existed - kill the inotifywait process
+    # by command line so the pipeline (and thus this script) can always end.
+    pkill -9 -f "inotifywait -m $SAVEDIR" 2> /dev/null || true
     if pidof inotifywait > /dev/null 2>&1; then
         # Intentionally unquoted: pidof can return several pids
         # shellcheck disable=SC2046

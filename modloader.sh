@@ -22,8 +22,17 @@ SCRIPTDIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 # shellcheck source=lib.sh
 source "$SCRIPTDIR/lib.sh"
 
-trap 'warn "WARNING: Mod loader cancelled by user." && exit 1' SIGINT
-trap 'error "An error occurred while running the mod loader :("' ERR
+# A rebuild works on a temporary directory that is swapped into place only
+# when it succeeds - a failed rebuild must never destroy the last good tree.
+NEWWORK=""
+cleanup_newwork() {
+    if [ -n "$NEWWORK" ] && [ -d "$NEWWORK" ]; then
+        rm -rf "$NEWWORK"
+    fi
+}
+trap 'warn "WARNING: Mod loader cancelled by user." && cleanup_newwork && exit 1' SIGINT
+trap 'error "An error occurred while running the mod loader :("; cleanup_newwork' ERR
+trap cleanup_newwork EXIT
 
 # Names of the game data files that can be patched/replaced, relative to the
 # tree root.
@@ -111,9 +120,13 @@ rebuild() {
     fi
 
     log "Rebuilding the working tree at $WORKDIR ..."
-    rm -rf "$WORKDIR"
-    mkdir -p "$WORKDIR"
-    cp -a "$BASEDIR/." "$WORKDIR/"
+    # Build in a temp dir and swap in only on success, so a failing rebuild
+    # can never leave the last good working tree broken.
+    rm -rf "${WORKDIR}".new.* 2> /dev/null || true
+    NEWWORK="${WORKDIR}.new.$$"
+    rm -rf "$NEWWORK"
+    mkdir -p "$NEWWORK"
+    cp -a "$BASEDIR/." "$NEWWORK/"
 
     local mod patch target rel
     local applied=0
@@ -124,7 +137,7 @@ rebuild() {
 
         # 1) full-file overrides
         if [ -d "$MODSDIR/$mod/files" ]; then
-            cp -a "$MODSDIR/$mod/files/." "$WORKDIR/"
+            cp -a "$MODSDIR/$mod/files/." "$NEWWORK/"
             for rel in "${DATA_FILES[@]}"; do
                 if [ -e "$MODSDIR/$mod/files/$rel" ]; then
                     warn "Mod '$mod' fully replaces $rel."
@@ -137,8 +150,15 @@ rebuild() {
         if [ -d "$MODSDIR/$mod/patches" ]; then
             for patch in "$MODSDIR/$mod"/patches/*.hpatch; do
                 if target=$(patch_target "$(basename "$patch")"); then
-                    hpatchz -f "$WORKDIR/$target" "$patch" "$WORKDIR/$target"
-                    log "  $(basename "$patch") -> $target"
+                    if hpatchz -f "$NEWWORK/$target" "$patch" "$NEWWORK/$target"; then
+                        log "  $(basename "$patch") -> $target"
+                    else
+                        # A failed hpatchz means the source data no longer
+                        # matches - this usually means an EARLIER mod replaced
+                        # this file with a version made from the original
+                        # (unpatched) data. Skip the patch but keep building.
+                        warn "Mod '$mod': failed to apply '$(basename "$patch")' to $target (source data does not match - an earlier mod likely replaced this file with one made from unpatched data). Skipping this patch."
+                    fi
                 else
                     warn "Mod '$mod': cannot apply '$(basename "$patch")' (expected names like 00-chapterselect.hpatch, and the chapter must exist) - skipping."
                 fi
@@ -150,7 +170,10 @@ rebuild() {
         log "No enabled mods - the working tree is a clean copy of the base game."
     fi
 
-    fingerprint > "$WORKDIR/.modstamp"
+    fingerprint > "$NEWWORK/.modstamp"
+    rm -rf "$WORKDIR"
+    mv "$NEWWORK" "$WORKDIR"
+    NEWWORK=""
     log "Working tree is up to date."
     return 0
 }

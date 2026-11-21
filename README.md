@@ -10,6 +10,7 @@ A fork of [deltaport](https://github.com/pugdev3/deltaport) (an unofficial attem
 
 * **Your original game files are never touched.** The old deltaport renamed, moved and patched files inside your Steam game folder. This version installs everything in `~/.local/share/DELTARUNE/deltaport` instead: game data is *copied* and patched there, and music/videos are *linked* (not moved) from your game folder. Steam verification, game updates and the original files all just work.
 * **A built-in Deltarune mod loader.** Drop mods into a `mods/` folder and they're applied automatically every time you launch the game (see [Modding](#modding-)).
+* **A launcher** (`launcher.sh`): a terminal menu to play, enable/disable/install/download/delete mods, and manage the port — no extra packages needed.
 
 This was originally made as a learning project for personal use; the upstream game also works fine under Proton.
 
@@ -33,16 +34,50 @@ Follow the instructions on screen. The port is installed in `~/.local/share/DELT
 
 To launch the game:
 
+* **Through the launcher (recommended):**
+  ```
+  ~/.local/share/DELTARUNE/deltaport/launcher.sh
+  ```
+  A simple terminal menu: play (with a starting-chapter choice), manage your mods (enable/disable/delete/install), update the port, check dependencies, see the port status. See [Launcher](#launcher-).
 * **Through Steam:** DELTARUNE → Properties → Launch Options → put this:
   ```
   ~/.local/share/DELTARUNE/deltaport/DELTARUNE.sh -- %command%
   ```
-* **Directly:** run `~/.local/share/DELTARUNE/deltaport/DELTARUNE.sh` in a terminal.
+* **Directly:** run `~/.local/share/DELTARUNE/deltaport/DELTARUNE.sh` in a terminal (launches straight into the game, no menu).
 
-When Steam updates the game, run `./port.sh` (or `~/.local/share/DELTARUNE/deltaport/update.sh`) again to update the port to the latest supported version. Your installed mods are kept.
+When Steam updates the game, run `./port.sh` (or `~/.local/share/DELTARUNE/deltaport/update.sh`, or the launcher's "Update port") again to update the port to the latest supported version. Your installed mods are kept.
 
 > [!NOTE]
 > If you have issues with keyboard input, create a file named `.hide_input` in the deltaport directory (`~/.local/share/DELTARUNE/deltaport/.hide_input`), it should hide all `/dev/input` devices from the runner (although no controllers should work).
+
+## Launcher <img width="30rem" alt="kris doing two" src="https://github.com/user-attachments/assets/973789b5-0c1b-4577-a24f-f7cb7314eb6c" />
+
+`launcher.sh` is a plain-terminal front-end for everything (no extra packages needed — arrow keys or `j`/`k` move, `Enter` selects, `q` goes back):
+
+```
+ > 1  Play Deltarune  (start: chapter select)
+   2  Manage mods  (enable / disable / install / delete)
+   3  Install mod from URL
+   4  Install mod from file
+   5  Browse known mods
+   6  Update port  (new game version)
+   7  Install / check dependencies
+   8  Port status
+   9  Help
+```
+
+* **Play Deltarune** — lets you pick the starting chapter, then runs `DELTARUNE.sh` in the same window. When the game quits you're back in the menu.
+* **Manage mods** — see every mod with its state (`[x]` enabled / `[-]` disabled) and where it came from:
+  * `t`/`Enter` — enable/disable (the working tree is rebuilt immediately, so the change is ready for the next launch),
+  * `i` — inspect a mod (what files it replaces, which chapters its patches touch, its source URL),
+  * `d` — delete a mod (with confirmation),
+  * `u` / `f` / `b` — install from a URL, from a local archive, or from the known-mods index.
+* **Install mod from URL / file** — downloads (or takes) a `.zip` / `.tar.gz` / `.tar.xz` and installs it into `mods/` with the next free `NN-` prefix:
+  * an archive containing a **deltaport mod folder** (`files/` and/or `patches/`) is installed as-is;
+  * an archive containing a **modded `data.win` / `game.unx`** (optionally in `chapterN_windows/` folders) is automatically converted into a `files/` override for you (with a warning about [chapter switching](#modding-));
+  * a **Deltamod** package (contains a `modding.xml`) is rejected with an explanation — see [Deltamod packages](#deltamod-packages-).
+* **Browse known mods** — a small, extensible list of mods (`mod-index.json`, next to `launcher.sh`); pick one and it's downloaded and installed. Add your own entries, see [Known mods index](#known-mods-index-).
+* **Update port / dependencies / status** — wrappers for `update.sh`, `deps.sh`, and a summary of your install (port version, detected game version, working-tree state, enabled mods, disk usage).
 
 ## Modding <img width="30rem" alt="kris doing two" src="https://github.com/user-attachments/assets/973789b5-0c1b-4577-a24f-f7cb7314eb6c" />
 
@@ -110,12 +145,41 @@ hdiffz base/assets/game.unx my-modded-game.unx 10-my-mod/patches/00-chapterselec
 
 ### Managing mods
 
+The easiest way is the launcher (`launcher.sh` → "Manage mods"). On the command line:
+
 ```shell
 ~/.local/share/DELTARUNE/deltaport/modloader.sh list        # list installed mods
 ~/.local/share/DELTARUNE/deltaport/modloader.sh check       # validate your mods' layout
 ~/.local/share/DELTARUNE/deltaport/modloader.sh rebuild     # force a rebuild of the game
 ~/.local/share/DELTARUNE/deltaport/modloader.sh status      # is the working tree up to date?
 ```
+
+Rebuilds are *non-destructive*: the new working tree is built in a temporary directory and only swapped in when it succeeds, so a broken mod can never leave you without a playable tree. If a single patch fails to apply (usually because an earlier mod replaced the data file with one made from unpatched data), it is skipped with a big warning instead of aborting the whole build.
+
+### Known mods index
+
+`mod-index.json` (shipped next to `launcher.sh`, and copied into the deltaport directory at port time) holds the list shown by "Browse known mods". It ships with the bundled NXRUNE mod; add your own entries:
+
+```json
+{
+  "mods": [
+    {
+      "id": "my-mod",
+      "name": "My Cool Mod",
+      "url": "https://github.com/someone/my-mod/releases/download/v1.0/my-mod.zip",
+      "description": "short one-line description"
+    }
+  ]
+}
+```
+
+`url` must point to a `.zip` / `.tar.gz` / `.tar.xz` that the launcher can install (a `files/`+`patches/` mod folder, or a modded `data.win`/`game.unx`). `id` is recorded in the mod folder (`.modid`) so you can tell where a mod came from.
+
+### Deltamod packages
+
+[DELTAMOD](https://github.com/deltamodders/deltamod) (the popular Deltarune mod manager) packages its mods as zips with a `modding.xml` manifest, and its patch pipeline is based on **xdelta**. The deltaport mod loader applies **hpatch** (hdiffpatch) files with `hpatchz`, so it can't apply Deltamod xdelta packages directly — the launcher detects them and tells you instead of installing something that would do nothing.
+
+If a mod you want is only available that way, you can usually get a compatible build: check the mod's repo for a raw `data.win`/`game.unx` or hpatch release, install the mod with Deltamod on a patched install and re-package its output folder as a deltaport mod, or ask the author for an hpatch/full-file build. Patches you make yourself (see above) work fine.
 
 ### Console borders <img height="50rem" alt="kris and ralsei pushing each other" src="https://github.com/user-attachments/assets/ed1143c7-fd1d-440a-8100-137d2ff2f659" />
 
@@ -193,6 +257,8 @@ This fork's layout (the original game folder is never modified):
 
 ~/.local/share/DELTARUNE/deltaport/   <- everything deltaport owns (self-contained)
     port.sh  update.sh  modloader.sh  DELTARUNE.sh  lib.sh  deps.sh
+    launcher.sh                      <- terminal menu: play / mods / downloads
+    mod-index.json                   <- the "Browse known mods" list (extend it!)
     files/patches/...                <- base patches + nxrune mod patches
     deltarune                        <- the GMS Linux runner
     .gamedir                         <- path of your untouched game folder

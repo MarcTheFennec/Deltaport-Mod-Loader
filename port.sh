@@ -98,6 +98,7 @@ function install_scripts_in_place {
     if [ "$SCRIPTDIR" != "$DELTAPORTDIR" ]; then
         cp "$SCRIPTDIR/port.sh" "$SCRIPTDIR/update.sh" "$SCRIPTDIR/deps.sh" \
             "$SCRIPTDIR/modloader.sh" "$SCRIPTDIR/DELTARUNE.sh" "$SCRIPTDIR/lib.sh" \
+            "$SCRIPTDIR/launcher.sh" "$SCRIPTDIR/mod-index.json" \
             "$DELTAPORTDIR/"
         cp "$SCRIPTDIR/deltarune" "${DELTAPORTDIR:?}/"
         cp "$SCRIPTDIR/icon.png" "${DELTAPORTDIR:?}/"

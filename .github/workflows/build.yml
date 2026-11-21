@@ -71,7 +71,7 @@ jobs:
           set -e
           NAME="deltaport-mod-loader-${{ steps.version.outputs.version }}"
           LISTING="$(tar -tzf "${NAME}.tar.gz")"
-          for required in ./port.sh ./update.sh ./deps.sh ./modloader.sh ./DELTARUNE.sh ./lib.sh ./deltarune ./icon.png ./files/options.ini ./files/patches/v0.0.253/00-chapterselect.hpatch ./files/patches/nxrune/00-chapterselect.hpatch; do
+          for required in ./port.sh ./update.sh ./deps.sh ./modloader.sh ./DELTARUNE.sh ./lib.sh ./launcher.sh ./mod-index.json ./deltarune ./icon.png ./files/options.ini ./files/patches/v0.0.253/00-chapterselect.hpatch ./files/patches/nxrune/00-chapterselect.hpatch; do
             if ! grep -qx "${required}" <<< "${LISTING}"; then
               echo "ERROR: required entry missing from archive: ${required}"
               exit 1
