@@ -4,9 +4,8 @@ set -euo pipefail
 
 SCRIPTDIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 FFMPEG4_INSTALLED=0
-FFMPEG_URL=""
 HDIFFPATCH_INSTALLED=0
-deps=("curl" "hpatchz" "inotifywait" "ffmpeg" "wget" "gamemode")
+deps=("curl" "hpatchz" "inotifywait" "ffmpeg" "wget" "gamemode" "jq" "unzip")
 # Internal / to display on screen.
 missing_deps=()
 missing_deps_list=()
@@ -25,7 +24,7 @@ if [ -d "$SCRIPTDIR/lib" ] || [ -f "/usr/lib64/libavcodec.so.58" ] || [ -f "/usr
     FFMPEG4_INSTALLED=1
 fi
 
-if command -v hpatchz 2>&1 >/dev/null;
+if command -v hpatchz > /dev/null 2>&1;
 then
     HDIFFPATCH_INSTALLED=1
 fi
@@ -38,7 +37,7 @@ install_patcher() {
     log "Installing hdiffpatch..."
     DOWNLOAD_URL=$(curl -s https://api.github.com/repos/sisong/HDiffPatch/releases/latest | jq --raw-output '.assets[1] | .browser_download_url')
     mkdir -p linux64
-    wget $DOWNLOAD_URL -O hdiffpatch.zip
+    wget "$DOWNLOAD_URL" -O hdiffpatch.zip
     unzip hdiffpatch.zip -d .
 
     sudo install -Dm 0755 'linux64/hdiffz' "/usr/bin/hdiffz"
@@ -65,6 +64,7 @@ if [[ $ARGS == "ffmpeg4" ]]; then FFMPEG4_INSTALLED=0; install_ffmpeg4 && exit 0
 
 function install_deps() {
     if [[ -f /etc/os-release ]]; then
+        # shellcheck disable=SC1091  # distro-specific file
         source /etc/os-release
         DISTRO_ID="${ID}"
         DISTRO_LIKE="${ID_LIKE:-}"
@@ -75,7 +75,7 @@ function install_deps() {
     install_ubuntu() {
         log "Installing dependencies..."
         sudo apt update && sudo apt upgrade -y
-        sudo apt install -y ${missing_deps[*]}
+        sudo apt install -y "${missing_deps[@]}"
         install_patcher
         install_ffmpeg4
         log "Dependencies sucessfully installed :)"
@@ -91,7 +91,7 @@ function install_deps() {
             log "Installing rpmfusion for necessary packages"
             sudo dnf install -y "https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm"
         fi
-        sudo dnf install --allowerasing -y ${missing_deps[*]}
+        sudo dnf install --allowerasing -y "${missing_deps[@]}"
         install_patcher
         log "Dependencies sucessfully installed :)"
         sleep 3
@@ -101,16 +101,16 @@ function install_deps() {
     install_arch() {
         log "Installing dependencies..."
         missing_deps+=("ffmpeg4.4")
-        if command -v paru 2>&1 >/dev/null
+        if command -v paru > /dev/null 2>&1
         then
-            paru -Sy --noconfirm ${missing_deps[*]} hdiffpatch-bin
-        elif command -v yay 2>&1 >/dev/null
+            paru -Sy --noconfirm "${missing_deps[@]}" hdiffpatch-bin
+        elif command -v yay > /dev/null 2>&1
         then
-            yay -Sy --noconfirm ${missing_deps[*]} hdiffpatch-bin
+            yay -Sy --noconfirm "${missing_deps[@]}" hdiffpatch-bin
         else
             # We need base-devel to install AUR packages on Arch
             missing_deps+=("base-devel git")
-            sudo pacman -Sy --noconfirm ${missing_deps[*]}
+            sudo pacman -Sy --noconfirm "${missing_deps[@]}"
             git clone https://aur.archlinux.org/hdiffpatch-bin.git
             cd hdiffpatch-bin
             makepkg -si
@@ -124,7 +124,6 @@ function install_deps() {
     case "${DISTRO_ID}" in
         ubuntu|debian)
             log "Ubuntu/Debian detected."
-            FFMPEG_URL="https://github.com/pugdev3/files/raw/refs/heads/main/ffmpeg4-v2.tar.gz"
             install_ubuntu
             ;;
         fedora)
@@ -155,7 +154,7 @@ function install_deps() {
 function check_deps() {
     for d in "${deps[@]}"
     do
-        if ! command -v $d 2>&1 >/dev/null
+        if ! command -v "$d" > /dev/null 2>&1
         then
             if [ "$d" == "inotifywait" ]; then
                 missing_deps+=("inotify-tools")
@@ -173,7 +172,7 @@ function check_deps() {
     if (( ${#missing_deps_list[@]} != 0 )); then
         log "You're missing the following dependencies: ${missing_deps_list[*]}"
         while true; do
-            read -p "Do you want to automatically install them? [y/n]: " yn
+            read -r -p "Do you want to automatically install them? [y/n]: " yn
             case $yn in
                 [Yy]* ) install_deps; break;;
                 [Nn]* ) warn "WARNING: Not installing dependencies may cause issues."; break;;
@@ -181,7 +180,7 @@ function check_deps() {
             esac
         done
    else
-        if command -v apt 2>&1 >/dev/null; then
+        if command -v apt > /dev/null 2>&1; then
             if [[ $FFMPEG4_INSTALLED == 0 ]]; then
                 log "FFmpeg4 missing and apt installed, assuming Ubuntu/Debian and downloading libs..."
                 install_ffmpeg4
